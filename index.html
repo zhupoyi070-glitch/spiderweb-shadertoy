@@ -81,22 +81,50 @@
     border-radius: 6px; padding: 4px 14px;
   }
   #tbHint:hover { background: #333; border-color: #fff; }
+  #dlg {
+    position: fixed; inset: 0; z-index: 45; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55);
+  }
+  #dlgCard {
+    width: 580px; max-width: 88vw; background: #0d0d0d; color: #eee;
+    border: 2px solid rgba(255,255,255,.85); border-radius: 12px;
+    padding: 24px 30px; position: relative;
+    font: 13px/1.9 Consolas, monospace;
+    box-shadow: 0 0 24px rgba(255,255,255,.15);
+  }
+  #dlgCard::before {
+    content: ""; position: absolute; inset: 0; border-radius: 10px; pointer-events: none;
+    background:
+      repeating-radial-gradient(circle at 0 0,    rgba(255,255,255,0) 0 16px, rgba(255,255,255,.16) 16px 17px),
+      repeating-radial-gradient(circle at 100% 0, rgba(255,255,255,0) 0 16px, rgba(255,255,255,.16) 16px 17px),
+      repeating-radial-gradient(circle at 0 100%, rgba(255,255,255,0) 0 16px, rgba(255,255,255,.16) 16px 17px),
+      repeating-radial-gradient(circle at 100% 100%,rgba(255,255,255,0) 0 16px, rgba(255,255,255,.16) 16px 17px);
+  }
+  #dlgTitle { color: #fff; font-size: 17px; margin-bottom: 12px; }
+  #dlgBody  { color: #ddd; white-space: pre-wrap; }
+  #btnDone {
+    margin-top: 18px; width: 100%; cursor: pointer;
+    font: 14px Consolas, monospace; padding: 10px 0;
+    background: #fff; color: #000; border: 0; border-radius: 8px;
+  }
+  #btnDone:hover { background: #ddd; }
   #webcorner {
-    position: fixed; left: 0; bottom: 0; width: 150px; height: 150px; z-index: 15;
+    position: fixed; left: 0; bottom: 0; width: 300px; height: 300px; z-index: 15;
     pointer-events: none;
     background:
       repeating-conic-gradient(from 90deg at 0% 100%,
         rgba(255,255,255,.25) 0deg 1.5deg, rgba(255,255,255,0) 1.5deg 15deg),
       repeating-radial-gradient(circle at 0% 100%,
-        rgba(255,255,255,0) 0 21px, rgba(255,255,255,.3) 21px 22.5px);
+        rgba(255,255,255,0) 0 42px, rgba(255,255,255,.3) 42px 44px);
   }
   #btnGame {
-    position: fixed; left: 18px; bottom: 18px; z-index: 20;
-    font: 16px/1 Consolas, monospace; letter-spacing: 1px; text-align: left;
-    padding: 15px 24px; cursor: pointer;
+    position: fixed; left: 13vw; bottom: 22vh; z-index: 20;
+    font: 20px/1 Consolas, monospace; letter-spacing: 2px; text-align: left;
+    padding: 22px 34px; cursor: pointer;
     background: #0a0a0a; color: #fff;
-    border: 2px solid rgba(255,255,255,.85); border-radius: 10px;
-    box-shadow: 0 0 16px rgba(255,255,255,.18);
+    border: 2px solid rgba(255,255,255,.85); border-radius: 12px;
+    box-shadow: 0 0 22px rgba(255,255,255,.22);
   }
   #btnGame:hover { background: #1e1e1e; transform: scale(1.05); }
   #btnGame.on { background: #fff; color: #000; }
@@ -141,6 +169,13 @@
   <div id="tbProg"></div>
   <button id="tbHint">💡 查看通关提示</button>
   <div id="tbGoal"></div>
+</div>
+<div id="dlg">
+  <div id="dlgCard">
+    <div id="dlgTitle"></div>
+    <div id="dlgBody"></div>
+    <button id="btnDone">完成 →</button>
+  </div>
 </div>
 <canvas id="fx" width="96" height="54"></canvas>
 <div id="err"></div>
@@ -427,29 +462,31 @@ float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
     s8 += MouseForce;
     }
     // v5:通关爬行离场——蜘蛛脱离蛛网,沿一条蛛丝直线爬向屏幕外
-    // (蛛网本体保持静止;腿部中幅摆动,频率随焦虑升高,营造不安爬行感)
+    // (蛛网本体保持静止;腿部一前一后交替摆动 = 步行动作,频率随焦虑升高)
     if (uCrawl > 0.0) {
         vec2 dir = normalize(uCrawlDir);
         vec2 pp  = vec2(-dir.y, dir.x);
         vec2 p   = uCrawlFrom + dir * (uCrawl * uCrawlLen);
         float ph = iTime * (7.0 + 5.0*uSpiderAnx);
         float am = 0.05 + 0.02*uSpiderAnx;
-        s0 = p + dir*0.055 + pp*( am     * sin(ph)       );
-        s1 = p + dir*0.025 + pp*( am*1.3 * sin(ph+1.6)   );
-        s2 = p - dir*0.02 + pp*( am*1.1 * sin(ph+3.1)   );
-        s3 = p - dir*0.05 + pp*( am     * sin(ph+4.7)   );
-        s4 = p + dir*0.05 + pp*( am*0.9 * sin(ph+0.8)   );
-        s5 = p - dir*0.01 + pp*( am*1.3 * sin(ph+2.2)   );
-        s6 = p - dir*0.04 + pp*( am     * sin(ph+3.9)   );
-        s7 = p + dir*0.02 + pp*( am*1.2 * sin(ph+5.2)   );
-        s8 = p + pp*(0.012*sin(ph*0.5));
+        s0 = p + dir*( 0.055 + am*sin(ph)      ) + pp* 0.032;
+        s1 = p + dir*( 0.025 + am*sin(ph+3.14) ) + pp* 0.046;
+        s2 = p + dir*(-0.02  + am*sin(ph+1.57) ) + pp* 0.040;
+        s3 = p + dir*(-0.05  + am*sin(ph+4.71) ) + pp*-0.030;
+        s4 = p + dir*( 0.05  + am*sin(ph+0.9)  ) + pp*-0.034;
+        s5 = p + dir*(-0.01  + am*sin(ph+3.6)  ) + pp*-0.046;
+        s6 = p + dir*(-0.04  + am*sin(ph+5.2)  ) + pp*-0.020;
+        s7 = p + dir*( 0.02  + am*sin(ph+0.6)  ) + pp* 0.020;
+        s8 = p + pp*(0.012*sin(ph*0.5));               // 身体轻微起伏
     }
-    // v4:蜘蛛焦虑抖动——点击越多,焦虑越高,抖动幅度与频率同步放大
-    float jf = 40.0 + 90.0*uSpiderAnx;
-    vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
-    s0 += J*1.2; s1 += J*0.8; s2 += J*1.1; s3 += J*0.9;
-    s4 += J*1.0; s5 += J*1.3; s6 += J*0.7; s7 += J*1.15;
-    s8 += J*1.4;
+    // v4:蜘蛛焦虑抖动(仅非爬行状态:爬行时只保留腿部步伐,不再叠加颤抖)
+    if (uCrawl <= 0.0) {
+        float jf = 40.0 + 90.0*uSpiderAnx;
+        vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
+        s0 += J*1.2; s1 += J*0.8; s2 += J*1.1; s3 += J*0.9;
+        s4 += J*1.0; s5 += J*1.3; s6 += J*0.7; s7 += J*1.15;
+        s8 += J*1.4;
+    }
     
     float spider = sdBezier(uv,s0,s8+vec2(-0.05,0.0),s8);
     spider = min(spider,sdBezier(uv,s7,s8+vec2(-0.05,0.0),s8));
@@ -721,11 +758,15 @@ const tb = $("taskbar"), tbTitle = $("tbTitle"), tbGoal = $("tbGoal"), tbProg = 
 function tbShow(title, goal, prog){
   tb.style.display = "block";
   tbTitle.textContent = title;
-  tbGoal.textContent = goal;
-  tbGoal.style.display = "none";                    // 提示默认收起,按提示按钮查看
-  $("tbHint").style.display = goal ? "inline-block" : "none";
-  $("tbHint").textContent = "💡 查看通关提示";
   tbProg.textContent = prog || "";
+  // 只在目标文本变化时收起提示(修复:每帧重置导致点击展开后立即被压回)
+  if (tbGoal.dataset.goal !== goal){
+    tbGoal.dataset.goal = goal;
+    tbGoal.textContent = goal;
+    tbGoal.style.display = "none";
+    $("tbHint").textContent = "💡 查看通关提示";
+  }
+  $("tbHint").style.display = goal ? "inline-block" : "none";
 }
 $("tbHint").addEventListener("click", () => {
   const show = tbGoal.style.display !== "block";
@@ -785,20 +826,29 @@ function fxUpdate(dt){
 }
 function completeLevel(){
   game.phase = "done";
-  tbShow("🎉 通关!· " + LEVELS[game.idx].name, LEVELS[game.idx].name + " 达成", "即将进入下一关…");
+  const L = LEVELS[game.idx];
+  tbShow("🎉 通关!· " + L.name, "", "烟花庆祝中…");
   celebrate();
-  setTimeout(() => {
-    if (game.idx < 1){
-      game.idx++; game.phase = "play"; game.t = 0;
-      game.base = null; game.clicked = false;
-      game.clicks = 0; game.crawl = false; game.anx = 0;
-      applyDefaults(); reset();
-    } else {
-      game.phase = "alldone";
-      tbShow("🎉🎉 前两关通关!", "第 3 关起制作中,敬请期待", "可点击「关卡模式」关闭,自由把玩蛛网");
-    }
-  }, 2600);
+  // 教学对话框:讲清本关的物理原理,点击完成后才进入下一关
+  $("dlgTitle").textContent = "🎓 教学时间 · " + L.name;
+  $("dlgBody").textContent = L.brief;
+  $("btnDone").textContent = (game.idx < 1) ? "完成,进入下一关 →" : "完成,自由把玩蛛网 →";
+  $("dlg").style.display = "flex";
 }
+$("btnDone").addEventListener("click", () => {
+  $("dlg").style.display = "none";
+  if (game.phase !== "done") return;
+  if (game.idx < 1){
+    game.idx++; game.phase = "play"; game.t = 0;
+    game.base = null; game.clicked = false;
+    game.clicks = 0; game.crawl = false; game.crawlPos = 0;
+    game.crawlFrom = null; game.crawlDirV = null; game.anx = 0;
+    applyDefaults(); reset();
+  } else {
+    game.phase = "alldone";
+    tbShow("🎉🎉 前两关通关!", "第 3 关起制作中,敬请期待", "可点击「关卡模式」关闭,自由把玩蛛网");
+  }
+});
 function gameUpdate(dt){
   const H = readNodes();
   let sx = 0, sy = 0;

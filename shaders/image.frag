@@ -75,29 +75,31 @@ float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
     s8 += MouseForce;
     }
     // v5:通关爬行离场——蜘蛛脱离蛛网,沿一条蛛丝直线爬向屏幕外
-    // (蛛网本体保持静止;腿部中幅摆动,频率随焦虑升高,营造不安爬行感)
+    // (蛛网本体保持静止;腿部一前一后交替摆动 = 步行动作,频率随焦虑升高)
     if (uCrawl > 0.0) {
         vec2 dir = normalize(uCrawlDir);
         vec2 pp  = vec2(-dir.y, dir.x);
         vec2 p   = uCrawlFrom + dir * (uCrawl * uCrawlLen);
         float ph = iTime * (7.0 + 5.0*uSpiderAnx);
         float am = 0.05 + 0.02*uSpiderAnx;
-        s0 = p + dir*0.055 + pp*( am     * sin(ph)       );
-        s1 = p + dir*0.025 + pp*( am*1.3 * sin(ph+1.6)   );
-        s2 = p - dir*0.02 + pp*( am*1.1 * sin(ph+3.1)   );
-        s3 = p - dir*0.05 + pp*( am     * sin(ph+4.7)   );
-        s4 = p + dir*0.05 + pp*( am*0.9 * sin(ph+0.8)   );
-        s5 = p - dir*0.01 + pp*( am*1.3 * sin(ph+2.2)   );
-        s6 = p - dir*0.04 + pp*( am     * sin(ph+3.9)   );
-        s7 = p + dir*0.02 + pp*( am*1.2 * sin(ph+5.2)   );
-        s8 = p + pp*(0.012*sin(ph*0.5));
+        s0 = p + dir*( 0.055 + am*sin(ph)      ) + pp* 0.032;
+        s1 = p + dir*( 0.025 + am*sin(ph+3.14) ) + pp* 0.046;
+        s2 = p + dir*(-0.02  + am*sin(ph+1.57) ) + pp* 0.040;
+        s3 = p + dir*(-0.05  + am*sin(ph+4.71) ) + pp*-0.030;
+        s4 = p + dir*( 0.05  + am*sin(ph+0.9)  ) + pp*-0.034;
+        s5 = p + dir*(-0.01  + am*sin(ph+3.6)  ) + pp*-0.046;
+        s6 = p + dir*(-0.04  + am*sin(ph+5.2)  ) + pp*-0.020;
+        s7 = p + dir*( 0.02  + am*sin(ph+0.6)  ) + pp* 0.020;
+        s8 = p + pp*(0.012*sin(ph*0.5));               // 身体轻微起伏
     }
-    // v4:蜘蛛焦虑抖动——点击越多,焦虑越高,抖动幅度与频率同步放大
-    float jf = 40.0 + 90.0*uSpiderAnx;
-    vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
-    s0 += J*1.2; s1 += J*0.8; s2 += J*1.1; s3 += J*0.9;
-    s4 += J*1.0; s5 += J*1.3; s6 += J*0.7; s7 += J*1.15;
-    s8 += J*1.4;
+    // v4:蜘蛛焦虑抖动(仅非爬行状态:爬行时只保留腿部步伐,不再叠加颤抖)
+    if (uCrawl <= 0.0) {
+        float jf = 40.0 + 90.0*uSpiderAnx;
+        vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
+        s0 += J*1.2; s1 += J*0.8; s2 += J*1.1; s3 += J*0.9;
+        s4 += J*1.0; s5 += J*1.3; s6 += J*0.7; s7 += J*1.15;
+        s8 += J*1.4;
+    }
     
     float spider = sdBezier(uv,s0,s8+vec2(-0.05,0.0),s8);
     spider = min(spider,sdBezier(uv,s7,s8+vec2(-0.05,0.0),s8));
