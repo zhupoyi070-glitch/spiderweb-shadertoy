@@ -55,12 +55,28 @@
     background: rgba(20,0,0,.94); color: #f99;
     font: 13px/1.6 Consolas, monospace; padding: 24px; white-space: pre-wrap;
   }
+  #taskbar {
+    position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+    z-index: 25; display: none; text-align: center; min-width: 430px;
+    background: rgba(0,0,0,.6); border: 1px solid #3a3; border-radius: 8px;
+    padding: 6px 16px; color: #eee; font: 12px/1.6 Consolas, monospace;
+  }
+  #tbTitle { color: #7f7; font-size: 13px; }
+  #tbGoal  { color: #ddd; }
+  #tbProg  { color: #fd5; }
+  #fx {
+    position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 30;
+    display: none; pointer-events: none; image-rendering: pixelated;
+  }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <button id="panelToggle">⚙ 参数</button>
 <div id="panel">
+  <div class="row">
+    <button id="btnGame" style="width:100%;font:12px Consolas,monospace;cursor:pointer;background:#369;border:0;border-radius:5px;padding:5px 0;color:#fff">🎮 关卡模式:关</button>
+  </div>
   <div class="row"><label><span>模拟步速(步/帧) <button class="tip" data-tip="每帧模拟的物理步数。调大:时间加速、蛛网运动更细腻,计算量也随之增大。"></button></span><span id="vSteps">1</span></label>
     <input type="range" id="sSteps" min="1" max="6" step="1" value="1"></div>
   <div class="row"><label><span>渲染精度 <button class="tip" data-tip="画面分辨率倍数。调低更流畅、调高更清晰;改变会重置物理模拟。"></button></span><span id="vScale">1.00x</span></label>
@@ -85,6 +101,12 @@
   <div style="margin-top:6px;color:#999">悬停 ? 查看参数说明&#10;空格=暂停  R=重置  P=面板  按住鼠标拖动=拉扯蛛网</div>
 </div>
 <div id="hud"></div>
+<div id="taskbar">
+  <div id="tbTitle"></div>
+  <div id="tbGoal"></div>
+  <div id="tbProg"></div>
+</div>
+<canvas id="fx" width="96" height="54"></canvas>
 <div id="err"></div>
 
 <script id="vs" type="x-shader/x-vertex">#version 300 es
@@ -104,6 +126,7 @@ uniform float K;         // 弹簧刚度(原 0.05)
 uniform float Friction;  // 摩擦阻尼(原 0.03)
 uniform vec2  Gravity;   // 重力(JS 传 (0,-强度),原 (0,-3))
 uniform float uMouseK;   // 拉网力度(原 0.4)
+uniform float uSpiderAnx; // 蜘蛛焦虑值(v4 游戏关卡:0..1,JS 传入,控制腿部抖动)
 #define MouseForce (iMouse.xy/R-vec2(0.7,0.5))*uMouseK
 #define spiderf ivec2[] (ivec2(0,2),ivec2(9,1),ivec2(7,1),ivec2(1,2),ivec2(5,2),ivec2(4,1),ivec2(2,1),ivec2(6,2));
 #define spidert ivec2[] (ivec2(0,1),ivec2(8,1),ivec2(6,2),ivec2(1,1),ivec2(5,3),ivec2(5,2),ivec2(2,0),ivec2(6,3));</script>
@@ -362,6 +385,12 @@ float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
     if(iMouse.z!=0.){
     s8 += MouseForce;
     }
+    // v4:蜘蛛焦虑抖动——点击越多,焦虑越高,抖动幅度与频率同步放大
+    float jf = 40.0 + 90.0*uSpiderAnx;
+    vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
+    s0 += J*1.2; s1 += J*0.8; s2 += J*1.1; s3 += J*0.9;
+    s4 += J*1.0; s5 += J*1.3; s6 += J*0.7; s7 += J*1.15;
+    s8 += J*1.4;
     
     float spider = sdBezier(uv,s0,s8+vec2(-0.05,0.0),s8);
     spider = min(spider,sdBezier(uv,s7,s8+vec2(-0.05,0.0),s8));
@@ -524,7 +553,7 @@ function uniforms(p, names){
   return u;
 }
 const bufU = uniforms(bufProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","K","Friction","Gravity","R1","uMouseK"]);
-const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","uMouseK"]);
+const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","uMouseK","uSpiderAnx"]);
 
 let texPair = null, fbo = null, bufW = 0, bufH = 0;
 function createBuffers(w, h){
@@ -580,11 +609,192 @@ function mpos(e){
   const k = Math.min(window.devicePixelRatio || 1, 2) * params.scale;
   return [ e.clientX * k, (canvas.clientHeight - e.clientY) * k ];
 }
-canvas.addEventListener("mousedown", e => { mDown = true; const p = mpos(e); mouse[0]=p[0]; mouse[1]=p[1]; mouse[2]=p[0]; mouse[3]=p[1]; });
+canvas.addEventListener("mousedown", e => {
+  mDown = true; const p = mpos(e); mouse[0]=p[0]; mouse[1]=p[1]; mouse[2]=p[0]; mouse[3]=p[1];
+  if (game.on && game.phase === "play" && !paused) {
+    if (game.idx === 0) game.clicked = true;               // L1:点过就算触碰
+    if (game.idx === 1 && game.spiderScr && !game.crawl) { // L2:点中蜘蛛
+      const d = Math.hypot(p[0]-game.spiderScr[0], p[1]-game.spiderScr[1]);
+      if (d < 90) {
+        game.clicks++;
+        game.anx = Math.min(1, game.anx + 0.3);
+      }
+    }
+  }
+});
 canvas.addEventListener("mousemove", e => { if (mDown) { const p = mpos(e); mouse[0]=p[0]; mouse[1]=p[1]; } });
 window.addEventListener("mouseup", () => { mDown = false; mouse[2]=-mouse[2]; mouse[3]=-mouse[3]; });
 
-/* ---------- 控制 ---------- */
+/* ================= 关卡模式 ================= */
+const FEET = [20,19,17,21,25,14,12,26];   // 8 只脚的纹理坐标(y*10+x)
+const game = { on:false, idx:0, phase:"idle", t:0, clicks:0, anx:0,
+               crawl:false, crawlDir:1, base:null, clicked:false,
+               avgDisp:0, spider:null, spiderScr:null, lastPos:null };
+
+const LEVELS = [
+  { name:"第一次触碰",
+    goal:"点击并拖动鼠标,让蛛网动起来",
+    brief:"蛛网是「质点-弹簧」系统:70 个质点由胡克定律弹簧 F=-k·Δx 相连。拖动鼠标 = 对附近质点施加外力,位移沿弹簧链像涟漪一样传遍整张网。",
+    locked:false },
+  { name:"不安的蜘蛛",
+    goal:"连续点击蜘蛛 15 次,把它吓跑(沿蛛网爬出画面)",
+    brief:"每次点击都会抬高蜘蛛的焦虑值:腿部抖动的振幅 A 与频率 ω 都正比于焦虑——点得越快,抖得越猛。15 次后它受惊逃离:鼠标力把质心持续拉向屏幕外,位移沿弹簧节点依次传递,看起来就是沿蛛网爬行;且弹簧越拉越长,回弹力 k·Δx 越大,爬行速度先慢后快。",
+    locked:false },
+  { name:"太空失重",
+    goal:"把重力强度调到 0.5 以下,保持 5 秒",
+    brief:"重力是每步加进速度里的恒定加速度 G·dt²/2。归零后只剩弹簧回弹力,蛛网回到无重力时的形状,并因阻尼极小而长时间轻轻荡漾——蜘蛛会漂到网的上方。",
+    locked:true },
+  { name:"软网实验室",
+    goal:"K ≤ 0.015 且摩擦 ≤ 0.01,然后拖动蛛网",
+    brief:"胡克定律里的 k 决定回复力强弱:k 小,弹簧「懒」,位移传得慢、回弹慢;摩擦(速度×(1-f))决定能量耗散:f 小,几乎无损耗,网会以固有频率长时间振荡。",
+    locked:true },
+  { name:"呼吸的网",
+    goal:"10 秒内让蛛网间距 R1 往复 ≥ 6 次(单次幅度 ≥ 0.02)",
+    brief:"R1 是弹簧的「自然长度」。胡克力正比于(实际长度-自然长度):改 R1 = 瞬间改变全部弹簧的平衡态,整张网会收缩/扩张去追赶新平衡——往复调节,网就像在呼吸。",
+    locked:true },
+  { name:"毕业:失重蹦迪",
+    goal:"重力 ≤ 0.5 时,10 秒内拉网力度往复 ≥ 6 次",
+    brief:"失重消除了恒定下拉力,拉网力度成为唯一周期性外力——相当于对弹簧系统做共振驱动,蜘蛛振幅越荡越大。这是「共振」的直观演示。",
+    locked:true },
+];
+
+const tb = $("taskbar"), tbTitle = $("tbTitle"), tbGoal = $("tbGoal"), tbProg = $("tbProg");
+function tbShow(title, goal, prog){
+  tb.style.display = "block";
+  tbTitle.textContent = title;
+  tbGoal.textContent = goal;
+  tbProg.textContent = prog || "";
+}
+function readNodes(){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texPair[readIdx], 0);
+  const h = new Float32Array(10 * 7 * 4);
+  gl.readPixels(0, 0, 10, 7, gl.RGBA, gl.FLOAT, h);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return h;
+}
+function applyDefaults(){
+  setSl("sK", "vK", 0.05); setSl("sFriction", "vFriction", 0.03);
+  setSl("sGravity", "vGravity", 3); setSl("sR1", "vR1", 0.02);
+  setSl("sMouseK", "vMouseK", 0.4);
+}
+function setSl(id, outId, v){
+  const el = $(id); el.value = v;
+  $(outId).textContent = typeof v === "number" ? v.toFixed(Math.abs(v) < 1 ? 3 : 1) : v;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+const fx = $("fx"), fxc = fx.getContext("2d");
+let fxActive = false, fxT = 0, fxP = [];
+function celebrate(){
+  fx.style.display = "block"; fxActive = true; fxT = 0; fxP = [];
+  const cols = ["#ffe066","#7ae0ff","#ff8ad8","#b3ff8a"];
+  for (let b = 0; b < 4; b++){
+    const bx = 14 + Math.random()*68, by = 8 + Math.random()*26;
+    for (let i = 0; i < 34; i++){
+      const a = Math.random()*6.283, s = 4 + Math.random()*16;
+      fxP.push({ x:bx, y:by, vx:Math.cos(a)*s, vy:Math.sin(a)*s - 5,
+        c: Math.random() < 0.6 ? "#ffffff" : cols[(Math.random()*cols.length)|0],
+        life: .9 + Math.random()*.5 });
+    }
+  }
+}
+function fxUpdate(dt){
+  fxT += dt;
+  fxc.clearRect(0, 0, 96, 54);
+  for (const p of fxP){
+    p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 14*dt; p.life -= dt*.7;
+    if (p.life > 0){
+      fxc.globalAlpha = Math.min(1, p.life);
+      fxc.fillStyle = p.c;
+      fxc.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+    }
+  }
+  fxc.globalAlpha = 1;
+  if (fxT > 2.2){ fxActive = false; fx.style.display = "none"; }
+}
+function completeLevel(){
+  game.phase = "done";
+  tbShow("🎉 通关!· " + LEVELS[game.idx].name, LEVELS[game.idx].name + " 达成", "即将进入下一关…");
+  celebrate();
+  setTimeout(() => {
+    if (game.idx < 1){
+      game.idx++; game.phase = "play"; game.t = 0;
+      game.base = null; game.clicked = false;
+      game.clicks = 0; game.crawl = false; game.anx = 0;
+      applyDefaults(); reset();
+    } else {
+      game.phase = "alldone";
+      tbShow("🎉🎉 前两关通关!", "第 3 关起制作中,敬请期待", "可点击「关卡模式」关闭,自由把玩蛛网");
+    }
+  }, 2600);
+}
+function gameUpdate(dt){
+  const H = readNodes();
+  let sx = 0, sy = 0;
+  for (const fi of FEET){ sx += H[fi*4]; sy += H[fi*4+1]; }
+  sx /= 8; sy /= 8;
+  game.spider = [sx, sy];
+  game.spiderScr = [sx*bufH, bufH - sy*bufH];   // 屏幕像素坐标(左下原)
+  let disp = 0, spd = 0;
+  for (let i = 0; i < 70; i++){
+    const x = H[i*4], y = H[i*4+1];
+    if (game.base)     disp += Math.hypot(x - game.base[i*2], y - game.base[i*2+1]);
+    if (game.lastPos)  spd  += Math.hypot(x - game.lastPos[i*2], y - game.lastPos[i*2+1]);
+  }
+  game.avgDisp = disp / 70; game.avgSpd = spd / 70;
+  const lp = new Float32Array(140);
+  for (let i = 0; i < 70; i++){ lp[i*2] = H[i*4]; lp[i*2+1] = H[i*4+1]; }
+  game.lastPos = lp;
+
+  const L = LEVELS[game.idx];
+  if (game.idx === 0){                                    // L1 第一次触碰
+    if (game.t > 1.5 && !game.base) game.base = lp;
+    let prog;
+    if (!game.clicked) prog = "点击蛛网任意处";
+    else {
+      const v = game.avgDisp.toFixed(3);
+      prog = game.base ? ("位移 " + v + " / 0.030") : "网在稳定中…";
+    }
+    tbShow("🎮 关卡 1/6 · " + L.name, L.goal, prog);
+    if (game.clicked && game.base && game.avgDisp > 0.03) completeLevel();
+  }
+  else if (game.idx === 1){                               // L2 不安的蜘蛛
+    game.anx *= Math.exp(-dt/1.5);
+    if (game.clicks < 15){
+      tbShow("🎮 关卡 2/6 · " + L.name, L.goal,
+        "点击蜘蛛 " + game.clicks + "/15 · 焦虑 " + Math.round(game.anx*100) + "%");
+    } else {
+      if (!game.crawl){
+        game.crawl = true; game.crawlT = 0;
+        game.crawlDir = (game.spiderScr[0] < bufW/2) ? -1 : 1;
+        setSl("sMouseK", "vMouseK", 1.5);            // 受惊狂奔:拉网力度自动拉满
+      }
+      game.crawlT += dt;
+      mouse[0] += game.crawlDir * 300 * dt;          // 虚拟鼠标持续向边缘移动
+      mouse[1] += (240 - mouse[1]) * Math.min(1, dt*1.5);
+      tbShow("🎮 关卡 2/6 · " + L.name, "蜘蛛正沿蛛网逃离…", "不安爬行中");
+      const off = game.spiderScr[0] < -40 || game.spiderScr[0] > bufW + 40;
+      if (off || game.crawlT > 12) completeLevel();
+    }
+  }
+}
+$("btnGame").addEventListener("click", () => {
+  game.on = !game.on;
+  $("btnGame").textContent = "🎮 关卡模式:" + (game.on ? "开" : "关");
+  $("btnGame").style.background = game.on ? "#3a3" : "#369";
+  if (game.on){
+    game.idx = 0; game.phase = "play"; game.t = 0;
+    game.base = null; game.clicked = false;
+    game.clicks = 0; game.crawl = false; game.anx = 0;
+    applyDefaults(); reset();
+    tb.style.display = "block";
+  } else {
+    tb.style.display = "none";
+    fx.style.display = "none"; fxActive = false;
+  }
+});
+
+/* ================= 控制 ================= */
 function reset(){ createBuffers(bufW, bufH); frame = 0; }
 function togglePause(){ paused = !paused; $("btnPause").textContent = paused ? "继续" : "暂停"; }
 $("btnPause").addEventListener("click", togglePause);
@@ -664,6 +874,7 @@ function runPass(prog, u, targetTex, w, h){
   if (u.Gravity) gl.uniform2f(u.Gravity, 0.0, -params.Gravity);
   if (u.R1) gl.uniform1f(u.R1, params.R1);
   if (u.uMouseK) gl.uniform1f(u.uMouseK, params.MouseK);
+  if (u.uSpiderAnx) gl.uniform1f(u.uSpiderAnx, game.anx);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
@@ -687,6 +898,8 @@ function loop(){
       frame++;
     }
   }
+  if (game.on && !paused && game.phase === "play") { game.t += dt; gameUpdate(dt); }
+  if (fxActive) fxUpdate(dt);
   runPass(imgProg, imgU, null, canvas.width, canvas.height);     // Image: 画蛛网与蜘蛛
 
   diag.frames = frame; diag.fps = fps;
@@ -702,6 +915,11 @@ function loop(){
 
 /* ---------- 诊断钩子 ---------- */
 window.__reset = reset;
+window.__game = () => ({ on:game.on, idx:game.idx, phase:game.phase,
+  clicks:game.clicks, anx:+game.anx.toFixed(2), t:+game.t.toFixed(1),
+  spiderScr: game.spiderScr ? game.spiderScr.map(v=>Math.round(v)) : null,
+  avgDisp:+(game.avgDisp||0).toFixed(4), clicked:game.clicked, crawl:game.crawl });
+window.__gameOn = () => { $("btnGame").click(); };
 window.__peek = () => {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texPair[readIdx], 0);

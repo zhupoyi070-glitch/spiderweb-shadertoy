@@ -74,6 +74,12 @@ float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
     if(iMouse.z!=0.){
     s8 += MouseForce;
     }
+    // v4:蜘蛛焦虑抖动——点击越多,焦虑越高,抖动幅度与频率同步放大
+    float jf = 40.0 + 90.0*uSpiderAnx;
+    vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
+    s0 += J*1.2; s1 += J*0.8; s2 += J*1.1; s3 += J*0.9;
+    s4 += J*1.0; s5 += J*1.3; s6 += J*0.7; s7 += J*1.15;
+    s8 += J*1.4;
     
     float spider = sdBezier(uv,s0,s8+vec2(-0.05,0.0),s8);
     spider = min(spider,sdBezier(uv,s7,s8+vec2(-0.05,0.0),s8));
