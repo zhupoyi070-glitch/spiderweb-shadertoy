@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpiderWeb — Shadertoy 4fc3zf 本地复现</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  #c { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; top: 8px; right: 10px; text-align: right;
+    font: 12px/1.5 Consolas, monospace; color: #9f9;
+    background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 6px;
+    pointer-events: none; white-space: pre; display: none;
+  }
+  #panelToggle {
+    position: fixed; left: 10px; top: 10px; z-index: 20;
+    font: 13px Consolas, monospace; color: #eee; cursor: pointer;
+    background: rgba(0,0,0,.55); border: 1px solid #555;
+    border-radius: 6px; padding: 5px 12px;
+  }
+  #panel {
+    position: fixed; left: 10px; top: 44px; z-index: 20; width: 250px;
+    background: rgba(0,0,0,.62); border: 1px solid #444; border-radius: 8px;
+    padding: 10px 12px; color: #ddd; font: 12px/1.5 Consolas, monospace;
+    backdrop-filter: blur(3px);
+  }
+  #panel hr { border: 0; border-top: 1px solid #444; margin: 8px 0; }
+  #panel .row { margin-bottom: 7px; }
+  #panel label { display: flex; justify-content: space-between; margin-bottom: 2px; }
+  #panel label span { color: #fd5; }
+  #panel input[type=range] { width: 100%; accent-color: #e33; height: 18px; margin: 0; }
+  #panel .chk { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  #panel .btns { display: flex; gap: 6px; }
+  #panel .btns button {
+    flex: 1; font: 12px Consolas, monospace; cursor: pointer;
+    background: #333; color: #eee; border: 1px solid #555; border-radius: 5px; padding: 4px 0;
+  }
+  #panel .btns button:hover { background: #444; }
+  #err {
+    position: fixed; inset: 0; display: none; overflow: auto; z-index: 40;
+    background: rgba(20,0,0,.94); color: #f99;
+    font: 13px/1.6 Consolas, monospace; padding: 24px; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="panelToggle">⚙ 参数</button>
+<div id="panel">
+  <div class="row"><label>模拟步速(步/帧) <span id="vSteps">1</span></label>
+    <input type="range" id="sSteps" min="1" max="6" step="1" value="1"></div>
+  <div class="row"><label>渲染精度 <span id="vScale">1.00x</span></label>
+    <input type="range" id="sScale" min="0.25" max="2" step="0.05" value="1"></div>
+  <div class="row"><label class="chk"><input type="checkbox" id="cFloat" checked> 浮点缓冲(Verlet 物理必需)</label></div>
+  <hr>
+  <div class="btns">
+    <button id="btnPause">暂停</button>
+    <button id="btnReset">重置</button>
+  </div>
+  <div style="margin-top:6px;color:#999">空格=暂停  R=重置  P=面板  按住鼠标拖动=拉扯蛛网</div>
+</div>
+<div id="hud"></div>
+<div id="err"></div>
+
+<script id="vs" type="x-shader/x-vertex">#version 300 es
+void main(){
+  vec2 p = vec2( float((gl_VertexID<<1)&2), float(gl_VertexID&2) );
+  gl_Position = vec4( p*2.0-1.0, 0.0, 1.0 );
+}</script>
+
+<script id="fs-common" type="text/x-fragment">#define GridSize ivec2(10,7)
+#define Sqrt2 1.41421
+#define F00 ivec2(0,0)
+#define F01 ivec2(0,1)
+#define R iResolution.xy
+#define PI 3.141592654
+#define K 0.05
+#define Friction 0.03
+#define Gravity vec2(0.,-3.)
+#define spiderf ivec2[] (ivec2(0,2),ivec2(9,1),ivec2(7,1),ivec2(1,2),ivec2(5,2),ivec2(4,1),ivec2(2,1),ivec2(6,2));
+#define spidert ivec2[] (ivec2(0,1),ivec2(8,1),ivec2(6,2),ivec2(1,1),ivec2(5,3),ivec2(5,2),ivec2(2,0),ivec2(6,3));
+#define MouseForce (iMouse.xy/R-vec2(0.7,0.5))*0.4</script>
+<script id="fs-bufferA" type="text/x-fragment">
+const float R1 = 0.02;
+
+vec2 HukeLaw(in vec2 localP,in vec2 otherP,float k,float r){
+	vec2 AB = otherP - localP;
+	float dis_AB = max(length(AB), 1e-6);   // 稳健性修复:防止两节点重合时 0/0=NaN 污染整个状态
+    vec2 dir_AB = AB / dis_AB;
+    return (dis_AB - r)*k * dir_AB;
+}
+
+vec4 GetP(in ivec2 iU){
+	return texelFetch(iChannel0,iU,0);
+}
+vec2 GetOtherP(in ivec2 iU,in ivec2 offset){
+	return texelFetch(iChannel0,iU+offset,0).xy;
+}
+
+vec2 Simulation(vec2 localP,ivec2 iU,ivec2 offset,float k,float r){
+	vec2 otherP = GetOtherP(iU,offset);	    	
+	return HukeLaw(localP,otherP,K,r);
+}
+vec2 Simulation1(vec2 localP,ivec2 iU0,ivec2 iU1,float k,float r){
+	vec4 otherP = GetP(iU1);	    	
+	return HukeLaw(localP,otherP.xy,K,r);
+}
+
+vec2 Constraint(in ivec2 iU,in vec2 localP){
+    
+    float r1 = R1*(float(iU.y)*0.8+1.);
+    float r2 = R1*(float(iU.y)*0.1+1.);
+    //spider node force  蛛网上下左右
+    //径向拉力
+    if(iU.x >0)
+    {
+        localP += Simulation(localP,iU,ivec2(-1, 0),K,r1);
+    }
+    if(iU.x < GridSize.x -1)
+    {
+    	localP += Simulation(localP,iU,ivec2( 1, 0),K,r1);
+    }
+    //横向拉力
+    if(iU.y > 0)
+    {
+        localP += Simulation(localP,iU,ivec2( 0,-1),K,r1);
+    }
+    
+    if(iU.y < GridSize.y - 1)
+    {
+    	localP += Simulation(localP,iU,ivec2( 0, 1),K,r2);
+    }
+    //Suture 缝合
+    if(iU.x == 0)
+    {
+        localP += Simulation(localP,iU,ivec2( GridSize.x - 1, 0),K,r1);
+    }
+    if(iU.x == GridSize.x-1)
+    {
+        localP += Simulation(localP,iU,ivec2( 1-GridSize.x, 0),K,r1);
+    }
+    //center force 中心拉力
+	if(iU.y == 0)
+    {
+        int halfroot = (GridSize.x)/2;
+        int offset = 1;
+        offset = iU.x>=halfroot?-halfroot:halfroot;
+        localP += Simulation(localP,iU,ivec2(offset,0),K,r1);
+    }
+    
+    return localP;
+}
+
+vec2 Spider(in ivec2 iU,in vec2 localP, ivec2 foot[8])
+{
+    vec2 spiderP = vec2(0.,0.);
+    float r = 0.15+sin(iTime*0.5)/60.;
+    for(int i =0;i<8;i++)
+    {
+     spiderP +=GetP(foot[i]).xy;
+    }
+    spiderP/=8.;
+    if(iMouse.z!=0.){
+    spiderP+=MouseForce;
+    }
+    if(iU ==foot[0])
+    {
+        
+        localP += HukeLaw(localP,spiderP,K,r);
+    }
+    
+    if(iU ==foot[1])
+    {
+        
+        localP += HukeLaw(localP,spiderP,K,r);
+    }
+    if(iU ==foot[2])
+    {
+        
+        localP += HukeLaw(localP,spiderP,K,r);
+        
+    }
+    if(iU ==foot[3])
+    {
+       
+        localP += HukeLaw(localP,spiderP,K,r);
+        
+    }
+    if(iU ==foot[7])
+    {
+       
+        localP += HukeLaw(localP,spiderP,K,r);
+        
+    }
+    if(iU ==foot[6])
+    {
+        
+        localP += HukeLaw(localP,spiderP,K,r);
+        
+    }
+    if(iU ==foot[5])
+    {
+       
+        localP += HukeLaw(localP,spiderP,K,r);
+        
+    }
+    if(iU ==foot[4])
+    {
+       
+        localP += HukeLaw(localP,spiderP,K,r);
+        
+    }
+    
+     return localP;
+}
+
+//Verlet Intergral
+
+vec4 VerletIntegral(in ivec2 iU){
+	vec4 P = GetP(iU);
+    ivec2 spiderfoot[8] = spiderf ;
+    if(iU.y == GridSize.y-1 ){
+   
+        float j = float(iU.x)/float(GridSize.x+1)*PI*2.;
+        vec2 sphere = vec2(sin(j)/.9+1.1,cos(j)/.9+0.5);
+        sphere = clamp(sphere,vec2(0.5,-0.15),vec2(1.75,0.95));
+    	P.xy = vec2(iU.x,iU.y)*R1+sphere;
+    }
+    
+    vec2 PreviousP = P.zw;
+    vec2 CurrentP = Constraint(iU,P.xy);
+    CurrentP = Spider(iU,CurrentP.xy,spiderfoot);
+    vec2 NextP = CurrentP + (CurrentP - PreviousP)*(1.-Friction) + Gravity*iTimeDelta*iTimeDelta/2.;
+    
+    PreviousP = CurrentP;
+
+    // 稳健性修复:位置钳制,防止拖拽激振后 Verlet 发散到 Inf/NaN
+    NextP = clamp(NextP, vec2(-5.0), vec2(5.0));
+
+    return vec4(NextP,PreviousP);
+}
+
+void mainImage( out vec4 C, in vec2 U )
+{
+    ivec2 iU = ivec2(U);
+    if(any(greaterThanEqual(iU,GridSize)))
+        return ;
+    
+    if(iFrame == 0)
+    {
+        float j = float(iU.x)/float(GridSize.x+1)*PI*2.;
+        vec2 sphere = vec2(sin(j)/.8+0.8,cos(j)/.8+0.9);
+        sphere = clamp(sphere,vec2(0.5,-0.13),vec2(1.75,0.9));
+        C = vec4((vec2(iU.x,iU.y)*R1+sphere).xyxy);
+        //C= vec4(0.5);
+        }
+    else
+    	C = VerletIntegral(iU);
+    
+	//C.r = 1.;
+}</script>
+<script id="fs-image" type="text/x-fragment">
+float Line(vec2 a, vec2 b, vec2 U)    // --- Distance to a line segment https://www.shadertoy.com/view/llySRh
+{   
+    U -= a, b -= a;
+	float h = dot( U, b ) / dot(b,b),
+          c = clamp(h, 0., 1.);
+    return h==c ? length( U - b * c ) : 1e5;   // dist to strict segment
+  //return        length( U - b * c );         // dist to segment with round ends
+}
+
+float sdEgg( in vec2 p, in float ra, in float rb )
+{
+    const float k = sqrt(3.0);
+    p.x = abs(p.x);
+    float r = ra - rb;
+    return ((p.y<0.0)       ? length(vec2(p.x,  p.y    )) - r :
+            (k*(p.x+r)<p.y) ? length(vec2(p.x,  p.y-k*r)) :
+                              length(vec2(p.x+r,p.y    )) - 2.0*r) - rb;
+}
+
+float dot2( in vec2 v ) { return dot(v,v); }
+
+//form https://www.shadertoy.com/view/MlKcDD
+float sdBezier( in vec2 pos, in vec2 A, in vec2 B, in vec2 C )
+{    
+    vec2 a = B - A;
+    vec2 b = A - 2.0*B + C;
+    vec2 c = a * 2.0;
+    vec2 d = A - pos;
+    float kk = 1.0/dot(b,b);
+    float kx = kk * dot(a,b);
+    float ky = kk * (2.0*dot(a,a)+dot(d,b)) / 3.0;
+    float kz = kk * dot(d,a);      
+    float res = 0.0;
+    float p = ky - kx*kx;
+    float p3 = p*p*p;
+    float q = kx*(2.0*kx*kx-3.0*ky) + kz;
+    float h = q*q + 4.0*p3;
+    if( h >= 0.0) 
+    { 
+        h = sqrt(h);
+        vec2 x = (vec2(h,-h)-q)/2.0;
+        vec2 uv = sign(x)*pow(abs(x), vec2(1.0/3.0));
+        float t = clamp( uv.x+uv.y-kx, 0.0, 1.0 );
+        res = dot2(d + (c + b*t)*t);
+    }
+    else
+    {
+        float z = sqrt(-p);
+        float v = acos( q/(p*z*2.0) ) / 3.0;
+        float m = cos(v);
+        float n = sin(v)*1.732050808;
+        vec3  t = clamp(vec3(m+m,-n-m,n-m)*z-kx,0.0,1.0);
+        res = min( dot2(d+(c+b*t.x)*t.x),
+                   dot2(d+(c+b*t.y)*t.y) );
+        // the third root cannot be the closest
+        // res = min(res,dot2(d+(c+b*t.z)*t.z));
+    }
+    return sqrt( res );
+}
+float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
+{
+
+    vec2 s0 = texelFetch(iChannel0,foot[0],0).xy;
+    vec2 s1 = texelFetch(iChannel0,foot[1],0).xy;
+    vec2 s2 = texelFetch(iChannel0,foot[2],0).xy;
+    vec2 s3 = texelFetch(iChannel0,foot[3],0).xy;
+    vec2 s4 = texelFetch(iChannel0,foot[4],0).xy;
+    vec2 s5 = texelFetch(iChannel0,foot[5],0).xy;
+    vec2 s6 = texelFetch(iChannel0,foot[6],0).xy;
+    vec2 s7 = texelFetch(iChannel0,foot[7],0).xy;
+    vec2 s8 = s0+s1+s2+s3+s4+s5+s6+s7;
+    s8 =s8/vec2(8.);
+    if(iMouse.z!=0.){
+    s8 += MouseForce;
+    }
+    
+    float spider = sdBezier(uv,s0,s8+vec2(-0.05,0.0),s8);
+    spider = min(spider,sdBezier(uv,s7,s8+vec2(-0.05,0.0),s8));
+    spider = min(spider,sdBezier(uv,s1,s8+vec2(-0.1,0.0),s8));
+    spider = min(spider,sdBezier(uv,s2,s8+vec2(-0.1,0.0),s8));
+    spider = min(spider,sdBezier(uv,s3,s8+vec2(0.05,0.0),s8));
+    spider = min(spider,sdBezier(uv,s4,s8+vec2(0.05,0.0),s8));
+    spider = min(spider,sdBezier(uv,s5,s8+vec2(0.1,0.0),s8));
+    spider = min(spider,sdBezier(uv,s6,s8+vec2(0.1,0.0),s8));
+    spider = min(spider,length(uv-s8+vec2(0.00,0.02))-0.03);
+    spider = min(spider,sdBezier(uv,s8+vec2(0.005*sin(iTime*10.)*clamp(0.,1.,sin(iTime*2.)-0.7)+0.02,-0.07),s8+vec2(0.03,-0.05),s8+vec2(0.02,0.)));
+    spider = min(spider,sdBezier(uv,s8-vec2(0.005*sin(iTime*10.)*clamp(0.,1.,sin(iTime*2.)-0.7)+0.02,0.07),s8+vec2(-0.03,-0.05),s8+vec2(-0.02,0.)));
+    spider = min(spider,sdEgg(uv-s8+vec2(0.00,-0.05),0.05,0.00));
+    
+    spider = min(spider,image*3.);
+    
+    spider += clamp(1.-length(uv-s8+vec2(0.011,0.038)+vec2(sin(iTime*1.)*0.004,cos(iTime*1.)*0.004))*140.,0.0,1.);
+    
+    spider += clamp(1.-length(uv-s8+vec2(-0.011,0.038)+vec2(sin(iTime*1.)*0.004,cos(iTime*1.)*0.004))*140.,0.0,1.);
+    
+    spider += clamp(1.-length(uv-s8+vec2(-0.021,0.021))*190.,0.0,1.);
+    
+    spider += clamp(1.-length(uv-s8+vec2(0.021,0.021))*190.,0.0,1.);
+    
+    
+    return spider;
+}
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    // Normalized pixel coordinates (from 0 to 1)
+    
+    ivec2 iU = ivec2(fragCoord);
+    vec2 uv = fragCoord/iResolution.y;
+    vec4 data = texelFetch(iChannel0,iU,0);
+    ivec2 spiderfoot[8] = spiderf;
+    float d = 200.;
+    float line=1e5;
+    for(int x=0;x < GridSize.x;x++){
+    	for(int y=0;y < GridSize.y;y++){
+        /**/
+        if(x > 0){
+            vec2 p = texelFetch(iChannel0,ivec2(x,y),0).xy;
+            vec2 p1 = texelFetch(iChannel0,ivec2(x-1,y),0).xy;
+            line = min(line,Line(p,p1,uv));
+        }
+        if(y > 0){
+            vec2 p = texelFetch(iChannel0,ivec2(x,y),0).xy;
+            vec2 p1 = texelFetch(iChannel0,ivec2(x,y-1),0).xy;
+            line = min(line,Line(p,p1,uv));
+        }
+        
+    	if(x == 0)
+        {
+            vec2 p = texelFetch(iChannel0,ivec2(x,y),0).xy;
+            vec2 p1 = texelFetch(iChannel0,ivec2(GridSize.x-1,y),0).xy;
+            line = min(line,Line(p,p1,uv));
+        }
+    	}
+    }
+    vec4 web = vec4(line<0.0015);
+    float Spider = DrawSpider(uv,spiderfoot,line);
+    
+    // Output to screen
+    //fragColor = vec4(d<0.01);
+    //line = Line(vec2(0.1,0.1),vec2(0.9,0.9),fragCoord/R);
+    fragColor = vec4(Spider<0.005);
+    //fragColor = vec4(Spider);
+}</script>
+
+<script>
+"use strict";
+(function(){
+const $ = id => document.getElementById(id);
+const canvas = $("c"), hud = $("hud"), errBox = $("err");
+
+const diag = window.__diag = {
+  gl: false, compiled: { bufferA: false, image: false },
+  frames: 0, fps: 0, bufFormat: "RGBA16F", compileError: null,
+};
+
+function fatal(msg){
+  errBox.style.display = "block";
+  errBox.textContent = msg;
+  diag.compileError = msg;
+}
+
+/* ---------- GL 基础 ---------- */
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false });
+if (!gl) { fatal("此浏览器不支持 WebGL2,无法运行。"); return; }
+diag.gl = true;
+// RGBA16F 缓冲作为渲染目标必需此扩展
+const extCBF = gl.getExtension("EXT_color_buffer_float");
+diag.extCBF = !!extCBF;
+canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); fatal("WebGL 上下文丢失,请刷新页面。"); });
+
+function compile(type, src){
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(sh);
+    fatal("着色器编译失败:\n" + log);
+    throw new Error(log);
+  }
+  return sh;
+}
+function program(fsSrc){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, $("vs").textContent.trimStart()));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(p);
+    fatal("程序链接失败:\n" + log);
+    throw new Error(log);
+  }
+  return p;
+}
+
+/* ---------- Shadertoy 标准前导 ---------- */
+const PRE = `#version 300 es
+precision highp float;
+precision highp int;
+uniform vec3      iResolution;
+uniform float     iTime;
+uniform float     iTimeDelta;
+uniform float     iFrameRate;
+uniform int       iFrame;
+uniform vec4      iMouse;
+uniform vec4      iDate;
+uniform float     iSampleRate;
+uniform vec3      iChannelResolution[4];
+uniform float     iChannelTime[4];
+uniform sampler2D iChannel0;
+uniform sampler2D iChannel1;
+uniform sampler2D iChannel2;
+uniform sampler2D iChannel3;
+out vec4          fragColor;
+`;
+// Common pass:两段着色器共享的宏与常量
+const COMMON = $("fs-common").textContent;
+
+const params = { steps: 1, scale: 1, floatBuf: true };
+let paused = false;
+
+/* ---------- 程序:Buffer A(Common + 主体)与 Image(Common + 主体) ---------- */
+const bufProg = program(PRE + COMMON + $("fs-bufferA").textContent + `
+void main(){ mainImage( fragColor, gl_FragCoord.xy ); }
+`);
+diag.compiled.bufferA = true;
+const imgProg = program(PRE + COMMON + $("fs-image").textContent + `
+void main(){ mainImage( fragColor, gl_FragCoord.xy ); }
+`);
+diag.compiled.image = true;
+
+function uniforms(p, names){
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(p, n);
+  return u;
+}
+const bufU = uniforms(bufProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0"]);
+const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0"]);
+
+let texPair = null, fbo = null, bufW = 0, bufH = 0;
+function createBuffers(w, h){
+  destroyBuffers();
+  bufW = w; bufH = h;
+  const useFloat = params.floatBuf && !!extCBF;   // 扩展缺失时自动回退 8 位
+  let ifmt, type;
+  if (useFloat) { ifmt = gl.RGBA16F; type = gl.HALF_FLOAT; }
+  else          { ifmt = gl.RGBA8;  type = gl.UNSIGNED_BYTE; }
+  const mk = () => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, gl.RGBA, type, null);
+    return t;
+  };
+  texPair = [mk(), mk()];
+  fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  for (const t of texPair) {
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  diag.bufFormat = useFloat ? "RGBA16F" : "RGBA8";
+}
+function destroyBuffers(){
+  if (texPair) { for (const t of texPair) gl.deleteTexture(t); texPair = null; }
+  if (fbo) { gl.deleteFramebuffer(fbo); fbo = null; }
+}
+
+/* ---------- 尺寸 ---------- */
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * params.scale;
+  const w = Math.max(2, Math.round(canvas.clientWidth * dpr));
+  const h = Math.max(2, Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w; canvas.height = h;
+    createBuffers(w, h);          // 尺寸变化即重置缓冲(与 Shadertoy 一致)
+    frame = 0;
+  }
+}
+window.addEventListener("resize", resize);
+
+/* ---------- 鼠标 (Shadertoy 原版语义:按下才更新 xy,z 按下为正/松开为负) ---------- */
+const mouse = [0, 0, 0, 0];
+let mDown = false;
+function mpos(e){
+  const k = Math.min(window.devicePixelRatio || 1, 2) * params.scale;
+  return [ e.clientX * k, (canvas.clientHeight - e.clientY) * k ];
+}
+canvas.addEventListener("mousedown", e => { mDown = true; const p = mpos(e); mouse[0]=p[0]; mouse[1]=p[1]; mouse[2]=p[0]; mouse[3]=p[1]; });
+canvas.addEventListener("mousemove", e => { if (mDown) { const p = mpos(e); mouse[0]=p[0]; mouse[1]=p[1]; } });
+window.addEventListener("mouseup", () => { mDown = false; mouse[2]=-mouse[2]; mouse[3]=-mouse[3]; });
+
+/* ---------- 控制 ---------- */
+function reset(){ createBuffers(bufW, bufH); frame = 0; }
+function togglePause(){ paused = !paused; $("btnPause").textContent = paused ? "继续" : "暂停"; }
+$("btnPause").addEventListener("click", togglePause);
+$("btnReset").addEventListener("click", reset);
+$("panelToggle").addEventListener("click", () => {
+  const p = $("panel");
+  p.style.display = p.style.display === "none" ? "block" : "none";
+});
+window.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); togglePause(); }
+  else if (e.code === "KeyR") reset();
+  else if (e.code === "KeyP") $("panelToggle").click();
+});
+
+function bindSlider(id, out, fmt, set){
+  const s = $(id), v = $(out);
+  s.addEventListener("input", () => { const x = parseFloat(s.value); set(x); v.textContent = fmt(x); });
+}
+bindSlider("sSteps", "vSteps", x => String(x), x => { params.steps = x; });
+bindSlider("sScale", "vScale", x => x.toFixed(2) + "x", x => { params.scale = x; });
+$("cFloat").addEventListener("change", e => { params.floatBuf = e.target.checked; reset(); });
+
+/* ---------- 渲染 pass ---------- */
+let readIdx = 0;
+function runPass(prog, u, targetTex, w, h){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targetTex ? fbo : null);
+  if (targetTex) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTex, 0);
+  gl.viewport(0, 0, w, h);
+  gl.useProgram(prog);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texPair[readIdx]);
+  gl.uniform1i(u.iChannel0, 0);
+  const d = new Date();
+  gl.uniform3f(u.iResolution, w, h, 1);
+  gl.uniform1f(u.iTime, curTime);
+  gl.uniform1f(u.iTimeDelta, Math.min(0.05, paused ? 0 : dtGlobal / params.steps));  // 钳制大 dt,防物理发散
+  gl.uniform1f(u.iFrameRate, fps);
+  gl.uniform1i(u.iFrame, frame);
+  gl.uniform4f(u.iMouse, mouse[0], mouse[1], mouse[2], mouse[3]);
+  gl.uniform4f(u.iDate, d.getFullYear(), d.getMonth() + 1, d.getDate(),
+               d.getHours()*3600 + d.getMinutes()*60 + d.getSeconds() + d.getMilliseconds()/1000);
+  gl.uniform1f(u.iSampleRate, 48000);
+  gl.uniform3fv(u.iChannelResolution, new Float32Array([bufW, bufH, 1, 0,0,0, 0,0,0, 0,0,0]));
+  gl.uniform1fv(u.iChannelTime, new Float32Array(4));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+/* ---------- 主循环 ---------- */
+let frame = 0, fps = 0, curTime = 0, lastNow = performance.now(), dtGlobal = 0;
+function loop(){
+  requestAnimationFrame(loop);
+  resize();
+  const now = performance.now();
+  const dt = Math.max((now - lastNow) / 1000, 1e-5);
+  lastNow = now;
+  fps = fps * 0.95 + (1 / dt) * 0.05;
+  dtGlobal = dt;
+  if (!paused) curTime += dt;
+
+  if (!paused) {
+    for (let i = 0; i < params.steps; i++) {
+      runPass(bufProg, bufU, texPair[1 - readIdx], bufW, bufH);  // Buffer A: Verlet 物理
+      readIdx = 1 - readIdx;
+      frame++;
+    }
+  }
+  runPass(imgProg, imgU, null, canvas.width, canvas.height);     // Image: 画蛛网与蜘蛛
+
+  diag.frames = frame; diag.fps = fps;
+  if (frame % 10 < params.steps) {
+    hud.style.display = "block";
+    hud.textContent =
+      "FPS " + fps.toFixed(1) + "   步 " + frame + "\n" +
+      "缓冲 " + bufW + "x" + bufH + " " + diag.bufFormat +
+      (paused ? "   [已暂停]" : "") + "\n" +
+      "空格=暂停  R=重置  P=面板  拖动=拉网";
+  }
+}
+
+/* ---------- 诊断钩子 ---------- */
+window.__reset = reset;
+window.__peek = () => {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texPair[readIdx], 0);
+  const heads = new Float32Array(50 * 4);
+  gl.readPixels(0, 0, 50, 1, gl.RGBA, gl.FLOAT, heads);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  let nan = 0, min = 1e9, max = -1e9, cx = 0, cy = 0, alive = 0;
+  for (let i = 0; i < 50; i++) {
+    const x = heads[i*4], y = heads[i*4+1];
+    if (Number.isNaN(x) || Number.isNaN(y)) nan++;
+    else { min = Math.min(min, x, y); max = Math.max(max, x, y); cx += x; cy += y; }
+    if (heads[i*4+3] > 0) alive++;
+  }
+  return { nan, alive, min: +min.toFixed(3), max: +max.toFixed(3),
+           centroid: [+(cx/50).toFixed(3), +(cy/50).toFixed(3)], glErr: gl.getError() };
+};
+window.__step = n => {
+  for (let i = 0; i < n; i++) {
+    runPass(bufProg, bufU, texPair[1 - readIdx], bufW, bufH);
+    readIdx = 1 - readIdx;
+    frame++;
+  }
+  runPass(imgProg, imgU, null, canvas.width, canvas.height);
+  return frame;
+};
+window.__mouse = (x, y, down) => {
+  const k = Math.min(window.devicePixelRatio || 1, 2) * params.scale;
+  const px = x * k, py = (canvas.clientHeight - y) * k;
+  mouse[0] = px; mouse[1] = py;
+  mouse[2] = down ? px : -Math.abs(mouse[2] || px);
+  mouse[3] = down ? py : -Math.abs(mouse[3] || py);
+  return [mouse[0], mouse[1], mouse[2], mouse[3]];
+};
+
+/* ---------- 启动 ---------- */
+resize();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
