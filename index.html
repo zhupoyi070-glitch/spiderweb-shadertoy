@@ -56,14 +56,50 @@
     font: 13px/1.6 Consolas, monospace; padding: 24px; white-space: pre-wrap;
   }
   #taskbar {
-    position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
-    z-index: 25; display: none; text-align: center; min-width: 430px;
-    background: rgba(0,0,0,.6); border: 1px solid #3a3; border-radius: 8px;
-    padding: 6px 16px; color: #eee; font: 12px/1.6 Consolas, monospace;
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 25; display: none; text-align: center; min-width: 560px;
+    background: rgba(0,0,0,.72); border: 2px solid rgba(255,255,255,.85);
+    border-radius: 10px;
+    padding: 12px 26px; color: #eee; font: 14px/1.7 Consolas, monospace;
+    box-shadow: 0 0 18px rgba(255,255,255,.12);
   }
-  #tbTitle { color: #7f7; font-size: 13px; }
-  #tbGoal  { color: #ddd; }
-  #tbProg  { color: #fd5; }
+  #taskbar::before {
+    content: ""; position: absolute; inset: 0; border-radius: 8px; pointer-events: none;
+    background:
+      repeating-radial-gradient(circle at 0 0,      rgba(255,255,255,0) 0 13px, rgba(255,255,255,.20) 13px 14px),
+      repeating-radial-gradient(circle at 100% 0,   rgba(255,255,255,0) 0 13px, rgba(255,255,255,.20) 13px 14px),
+      repeating-radial-gradient(circle at 0 100%,   rgba(255,255,255,0) 0 13px, rgba(255,255,255,.20) 13px 14px),
+      repeating-radial-gradient(circle at 100% 100%,rgba(255,255,255,0) 0 13px, rgba(255,255,255,.20) 13px 14px);
+  }
+  #tbTitle { color: #fff; font-size: 17px; letter-spacing: 1px; }
+  #tbGoal  { color: #ffe9a8; font-size: 14px; display: none; margin-top: 4px;
+             background: rgba(255,255,255,.07); border-radius: 6px; padding: 4px 10px; }
+  #tbProg  { color: #fd5; font-size: 14px; }
+  #tbHint {
+    margin-top: 7px; font: 13px Consolas, monospace; cursor: pointer;
+    background: #1c1c1c; color: #fff; border: 1px solid #888;
+    border-radius: 6px; padding: 4px 14px;
+  }
+  #tbHint:hover { background: #333; border-color: #fff; }
+  #webcorner {
+    position: fixed; left: 0; bottom: 0; width: 150px; height: 150px; z-index: 15;
+    pointer-events: none;
+    background:
+      repeating-conic-gradient(from 90deg at 0% 100%,
+        rgba(255,255,255,.25) 0deg 1.5deg, rgba(255,255,255,0) 1.5deg 15deg),
+      repeating-radial-gradient(circle at 0% 100%,
+        rgba(255,255,255,0) 0 21px, rgba(255,255,255,.3) 21px 22.5px);
+  }
+  #btnGame {
+    position: fixed; left: 18px; bottom: 18px; z-index: 20;
+    font: 16px/1 Consolas, monospace; letter-spacing: 1px; text-align: left;
+    padding: 15px 24px; cursor: pointer;
+    background: #0a0a0a; color: #fff;
+    border: 2px solid rgba(255,255,255,.85); border-radius: 10px;
+    box-shadow: 0 0 16px rgba(255,255,255,.18);
+  }
+  #btnGame:hover { background: #1e1e1e; transform: scale(1.05); }
+  #btnGame.on { background: #fff; color: #000; }
   #fx {
     position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 30;
     display: none; pointer-events: none; image-rendering: pixelated;
@@ -72,11 +108,10 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="webcorner"></div>
+<button id="btnGame">🕷️ 关卡模式:关</button>
 <button id="panelToggle">⚙ 参数</button>
 <div id="panel">
-  <div class="row">
-    <button id="btnGame" style="width:100%;font:12px Consolas,monospace;cursor:pointer;background:#369;border:0;border-radius:5px;padding:5px 0;color:#fff">🎮 关卡模式:关</button>
-  </div>
   <div class="row"><label><span>模拟步速(步/帧) <button class="tip" data-tip="每帧模拟的物理步数。调大:时间加速、蛛网运动更细腻,计算量也随之增大。"></button></span><span id="vSteps">1</span></label>
     <input type="range" id="sSteps" min="1" max="6" step="1" value="1"></div>
   <div class="row"><label><span>渲染精度 <button class="tip" data-tip="画面分辨率倍数。调低更流畅、调高更清晰;改变会重置物理模拟。"></button></span><span id="vScale">1.00x</span></label>
@@ -103,8 +138,9 @@
 <div id="hud"></div>
 <div id="taskbar">
   <div id="tbTitle"></div>
-  <div id="tbGoal"></div>
   <div id="tbProg"></div>
+  <button id="tbHint">💡 查看通关提示</button>
+  <div id="tbGoal"></div>
 </div>
 <canvas id="fx" width="96" height="54"></canvas>
 <div id="err"></div>
@@ -127,6 +163,11 @@ uniform float Friction;  // 摩擦阻尼(原 0.03)
 uniform vec2  Gravity;   // 重力(JS 传 (0,-强度),原 (0,-3))
 uniform float uMouseK;   // 拉网力度(原 0.4)
 uniform float uSpiderAnx; // 蜘蛛焦虑值(v4 游戏关卡:0..1,JS 传入,控制腿部抖动)
+// v5:爬行离场(第二关通关演出)
+uniform float uCrawl;     // 爬行进度 0..1(JS 驱动)
+uniform vec2  uCrawlFrom; // 爬行起点(蜘蛛质心离开蛛网时的位置)
+uniform vec2  uCrawlDir;  // 爬行方向(指向最近的屏幕外角落)
+uniform float uCrawlLen;  // 爬行总距离(保证走出屏幕)
 #define MouseForce (iMouse.xy/R-vec2(0.7,0.5))*uMouseK
 #define spiderf ivec2[] (ivec2(0,2),ivec2(9,1),ivec2(7,1),ivec2(1,2),ivec2(5,2),ivec2(4,1),ivec2(2,1),ivec2(6,2));
 #define spidert ivec2[] (ivec2(0,1),ivec2(8,1),ivec2(6,2),ivec2(1,1),ivec2(5,3),ivec2(5,2),ivec2(2,0),ivec2(6,3));</script>
@@ -385,6 +426,24 @@ float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
     if(iMouse.z!=0.){
     s8 += MouseForce;
     }
+    // v5:通关爬行离场——蜘蛛脱离蛛网,沿一条蛛丝直线爬向屏幕外
+    // (蛛网本体保持静止;腿部中幅摆动,频率随焦虑升高,营造不安爬行感)
+    if (uCrawl > 0.0) {
+        vec2 dir = normalize(uCrawlDir);
+        vec2 pp  = vec2(-dir.y, dir.x);
+        vec2 p   = uCrawlFrom + dir * (uCrawl * uCrawlLen);
+        float ph = iTime * (7.0 + 5.0*uSpiderAnx);
+        float am = 0.05 + 0.02*uSpiderAnx;
+        s0 = p + dir*0.055 + pp*( am     * sin(ph)       );
+        s1 = p + dir*0.025 + pp*( am*1.3 * sin(ph+1.6)   );
+        s2 = p - dir*0.02 + pp*( am*1.1 * sin(ph+3.1)   );
+        s3 = p - dir*0.05 + pp*( am     * sin(ph+4.7)   );
+        s4 = p + dir*0.05 + pp*( am*0.9 * sin(ph+0.8)   );
+        s5 = p - dir*0.01 + pp*( am*1.3 * sin(ph+2.2)   );
+        s6 = p - dir*0.04 + pp*( am     * sin(ph+3.9)   );
+        s7 = p + dir*0.02 + pp*( am*1.2 * sin(ph+5.2)   );
+        s8 = p + pp*(0.012*sin(ph*0.5));
+    }
     // v4:蜘蛛焦虑抖动——点击越多,焦虑越高,抖动幅度与频率同步放大
     float jf = 40.0 + 90.0*uSpiderAnx;
     vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
@@ -553,7 +612,7 @@ function uniforms(p, names){
   return u;
 }
 const bufU = uniforms(bufProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","K","Friction","Gravity","R1","uMouseK"]);
-const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","uMouseK","uSpiderAnx"]);
+const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","uMouseK","uSpiderAnx","uCrawl","uCrawlFrom","uCrawlDir","uCrawlLen"]);
 
 let texPair = null, fbo = null, bufW = 0, bufH = 0;
 function createBuffers(w, h){
@@ -663,8 +722,16 @@ function tbShow(title, goal, prog){
   tb.style.display = "block";
   tbTitle.textContent = title;
   tbGoal.textContent = goal;
+  tbGoal.style.display = "none";                    // 提示默认收起,按提示按钮查看
+  $("tbHint").style.display = goal ? "inline-block" : "none";
+  $("tbHint").textContent = "💡 查看通关提示";
   tbProg.textContent = prog || "";
 }
+$("tbHint").addEventListener("click", () => {
+  const show = tbGoal.style.display !== "block";
+  tbGoal.style.display = show ? "block" : "none";
+  $("tbHint").textContent = show ? "🙈 收起提示" : "💡 查看通关提示";
+});
 function readNodes(){
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texPair[readIdx], 0);
@@ -684,25 +751,29 @@ function setSl(id, outId, v){
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 const fx = $("fx"), fxc = fx.getContext("2d");
-let fxActive = false, fxT = 0, fxP = [];
-function celebrate(){
-  fx.style.display = "block"; fxActive = true; fxT = 0; fxP = [];
+let fxActive = false, fxT = 0, fxP = [], fxW2 = false;
+function fxWave(n){
   const cols = ["#ffe066","#7ae0ff","#ff8ad8","#b3ff8a"];
-  for (let b = 0; b < 4; b++){
+  for (let b = 0; b < n; b++){
     const bx = 14 + Math.random()*68, by = 8 + Math.random()*26;
-    for (let i = 0; i < 34; i++){
+    for (let i = 0; i < 38; i++){
       const a = Math.random()*6.283, s = 4 + Math.random()*16;
       fxP.push({ x:bx, y:by, vx:Math.cos(a)*s, vy:Math.sin(a)*s - 5,
-        c: Math.random() < 0.6 ? "#ffffff" : cols[(Math.random()*cols.length)|0],
+        c: Math.random() < 0.55 ? "#ffffff" : cols[(Math.random()*cols.length)|0],
         life: .9 + Math.random()*.5 });
     }
   }
 }
+function celebrate(){
+  fx.style.display = "block"; fxActive = true; fxT = 0; fxW2 = false; fxP = [];
+  fxWave(4);
+}
 function fxUpdate(dt){
   fxT += dt;
+  if (fxT > 1.05 && !fxW2){ fxW2 = true; fxWave(5); }   // 第二波,更热闹
   fxc.clearRect(0, 0, 96, 54);
   for (const p of fxP){
-    p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 14*dt; p.life -= dt*.7;
+    p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 14*dt; p.life -= dt*.6;
     if (p.life > 0){
       fxc.globalAlpha = Math.min(1, p.life);
       fxc.fillStyle = p.c;
@@ -710,7 +781,7 @@ function fxUpdate(dt){
     }
   }
   fxc.globalAlpha = 1;
-  if (fxT > 2.2){ fxActive = false; fx.style.display = "none"; }
+  if (fxT > 2.8){ fxActive = false; fx.style.display = "none"; }
 }
 function completeLevel(){
   game.phase = "done";
@@ -748,14 +819,15 @@ function gameUpdate(dt){
 
   const L = LEVELS[game.idx];
   if (game.idx === 0){                                    // L1 第一次触碰
-    if (game.t > 1.5 && !game.base) game.base = lp;
     let prog;
-    if (!game.clicked) prog = "点击蛛网任意处";
-    else {
+    if (!game.clicked){
+      prog = "点击蛛网任意处";
+    } else {
+      if (!game.base) game.base = lp;                     // 点击瞬间捕获基线,之后的位移才计数
       const v = game.avgDisp.toFixed(3);
-      prog = game.base ? ("位移 " + v + " / 0.030") : "网在稳定中…";
+      prog = "位移 " + v + " / 0.030";
     }
-    tbShow("🎮 关卡 1/6 · " + L.name, L.goal, prog);
+    tbShow("🕷️ 关卡 1/6 · " + L.name, L.goal, prog);
     if (game.clicked && game.base && game.avgDisp > 0.03) completeLevel();
   }
   else if (game.idx === 1){                               // L2 不安的蜘蛛
@@ -765,27 +837,42 @@ function gameUpdate(dt){
         "点击蜘蛛 " + game.clicks + "/15 · 焦虑 " + Math.round(game.anx*100) + "%");
     } else {
       if (!game.crawl){
-        game.crawl = true; game.crawlT = 0;
-        game.crawlDir = (game.spiderScr[0] < bufW/2) ? -1 : 1;
-        setSl("sMouseK", "vMouseK", 1.5);            // 受惊狂奔:拉网力度自动拉满
+        game.crawl = true; game.crawlT = 0; game.crawlPos = 0;
+        game.crawlFrom = [game.spider[0], game.spider[1]];
+        // 选最近画面角的爬行方向
+        const corners = [[-0.3,-0.3],[2.08,-0.3],[-0.3,1.3],[2.08,1.3]];
+        let best = 0, bd = 1e9;
+        corners.forEach((c,i)=>{ const d=Math.hypot(c[0]-game.spider[0], c[1]-game.spider[1]);
+                                 if(d<bd){bd=d;best=i;} });
+        const dx = corners[best][0]-game.spider[0], dy = corners[best][1]-game.spider[1];
+        const dl = Math.hypot(dx,dy);
+        game.crawlDirV = [dx/dl, dy/dl];
+        mouse[2] = 0; mouse[3] = 0;          // 松开鼠标:物理蛛网不再受力,保持静止
+        game.anx = Math.max(game.anx, 0.8);  // 逃离途中保持不安(腿摆更快)
       }
       game.crawlT += dt;
-      mouse[0] += game.crawlDir * 300 * dt;          // 虚拟鼠标持续向边缘移动
-      mouse[1] += (240 - mouse[1]) * Math.min(1, dt*1.5);
-      tbShow("🎮 关卡 2/6 · " + L.name, "蜘蛛正沿蛛网逃离…", "不安爬行中");
-      const off = game.spiderScr[0] < -40 || game.spiderScr[0] > bufW + 40;
-      if (off || game.crawlT > 12) completeLevel();
+      game.crawlPos = Math.min(1, game.crawlT/4.5);
+      game.anx = Math.max(game.anx * Math.exp(-dt/8.0), 0.8);
+      // 蜘蛛当前屏幕位置 = 起点 + 方向 × 已爬距离(超出屏幕边缘即通关)
+      const px = (game.crawlFrom[0] + game.crawlDirV[0]*(game.crawlPos*2.6)) * bufH;
+      const py = bufH - (game.crawlFrom[1] + game.crawlDirV[1]*(game.crawlPos*2.6)) * bufH;
+      game.spiderScr = [Math.round(px), Math.round(py)];
+      tbShow("🕷️ 关卡 2/6 · " + L.name, "蜘蛛正沿蛛丝向屏幕外爬行,蛛网保持静止…",
+             "不安爬行中 · 进度 " + Math.round(game.crawlPos*100) + "%");
+      const off = px < -50 || px > bufW+50 || py < -50 || py > bufH+50;
+      if (off || game.crawlPos >= 1) completeLevel();
     }
   }
 }
 $("btnGame").addEventListener("click", () => {
   game.on = !game.on;
-  $("btnGame").textContent = "🎮 关卡模式:" + (game.on ? "开" : "关");
-  $("btnGame").style.background = game.on ? "#3a3" : "#369";
+  $("btnGame").textContent = "🕷️ 关卡模式:" + (game.on ? "开" : "关");
+  $("btnGame").classList.toggle("on", game.on);
   if (game.on){
     game.idx = 0; game.phase = "play"; game.t = 0;
     game.base = null; game.clicked = false;
-    game.clicks = 0; game.crawl = false; game.anx = 0;
+    game.clicks = 0; game.crawl = false; game.crawlPos = 0;
+    game.crawlFrom = null; game.crawlDirV = null; game.anx = 0;
     applyDefaults(); reset();
     tb.style.display = "block";
   } else {
@@ -875,6 +962,14 @@ function runPass(prog, u, targetTex, w, h){
   if (u.R1) gl.uniform1f(u.R1, params.R1);
   if (u.uMouseK) gl.uniform1f(u.uMouseK, params.MouseK);
   if (u.uSpiderAnx) gl.uniform1f(u.uSpiderAnx, game.anx);
+  if (u.uCrawl) {
+    gl.uniform1f(u.uCrawl, game.crawlPos || 0);
+    gl.uniform2f(u.uCrawlFrom, game.crawlFrom ? game.crawlFrom[0] : 0,
+                               game.crawlFrom ? game.crawlFrom[1] : 0);
+    const dv = game.crawlDirV || [1, 0];
+    gl.uniform2f(u.uCrawlDir, dv[0], dv[1]);
+    gl.uniform1f(u.uCrawlLen, 2.2);
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }

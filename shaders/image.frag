@@ -74,6 +74,24 @@ float DrawSpider(vec2 uv,ivec2 foot[8] ,float image)
     if(iMouse.z!=0.){
     s8 += MouseForce;
     }
+    // v5:通关爬行离场——蜘蛛脱离蛛网,沿一条蛛丝直线爬向屏幕外
+    // (蛛网本体保持静止;腿部中幅摆动,频率随焦虑升高,营造不安爬行感)
+    if (uCrawl > 0.0) {
+        vec2 dir = normalize(uCrawlDir);
+        vec2 pp  = vec2(-dir.y, dir.x);
+        vec2 p   = uCrawlFrom + dir * (uCrawl * uCrawlLen);
+        float ph = iTime * (7.0 + 5.0*uSpiderAnx);
+        float am = 0.05 + 0.02*uSpiderAnx;
+        s0 = p + dir*0.055 + pp*( am     * sin(ph)       );
+        s1 = p + dir*0.025 + pp*( am*1.3 * sin(ph+1.6)   );
+        s2 = p - dir*0.02 + pp*( am*1.1 * sin(ph+3.1)   );
+        s3 = p - dir*0.05 + pp*( am     * sin(ph+4.7)   );
+        s4 = p + dir*0.05 + pp*( am*0.9 * sin(ph+0.8)   );
+        s5 = p - dir*0.01 + pp*( am*1.3 * sin(ph+2.2)   );
+        s6 = p - dir*0.04 + pp*( am     * sin(ph+3.9)   );
+        s7 = p + dir*0.02 + pp*( am*1.2 * sin(ph+5.2)   );
+        s8 = p + pp*(0.012*sin(ph*0.5));
+    }
     // v4:蜘蛛焦虑抖动——点击越多,焦虑越高,抖动幅度与频率同步放大
     float jf = 40.0 + 90.0*uSpiderAnx;
     vec2 J = uSpiderAnx * 0.012 * vec2( sin(iTime*jf), cos(iTime*jf*1.31) );
