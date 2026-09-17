@@ -35,6 +35,7 @@ Verlet 积分,胡克定律弹簧约束,带重力、摩擦、回弹;蜘蛛的 8 �
 
 前五项物理参数对应 `common.frag`/`bufferA.frag` 里的 uniform(`K/Friction/Gravity/R1/uMouseK`),
 默认值 = 原作常量,实时生效无需重置。
+每个参数旁有 **「?」提示按钮**,悬停或点击会弹出该参数的效果说明。
 
 ## 技术说明
 

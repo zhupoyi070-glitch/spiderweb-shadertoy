@@ -37,6 +37,19 @@
     background: #333; color: #eee; border: 1px solid #555; border-radius: 5px; padding: 4px 0;
   }
   #panel .btns button:hover { background: #444; }
+  #panel .tip {
+    display: inline-block; width: 14px; height: 14px; line-height: 13px;
+    text-align: center; border-radius: 50%; background: #666; color: #eee;
+    font-size: 10px; cursor: help; margin-left: 3px; padding: 0; border: 0;
+    vertical-align: 1px;
+  }
+  #panel .tip:hover { background: #e33; }
+  #tooltip {
+    position: fixed; z-index: 60; max-width: 260px; display: none;
+    background: rgba(15,15,15,.96); color: #ffe; border: 1px solid #e33;
+    border-radius: 6px; padding: 8px 10px; font: 12px/1.6 Consolas, monospace;
+    pointer-events: none; box-shadow: 0 2px 12px rgba(0,0,0,.6);
+  }
   #err {
     position: fixed; inset: 0; display: none; overflow: auto; z-index: 40;
     background: rgba(20,0,0,.94); color: #f99;
@@ -48,28 +61,28 @@
 <canvas id="c"></canvas>
 <button id="panelToggle">⚙ 参数</button>
 <div id="panel">
-  <div class="row"><label>模拟步速(步/帧) <span id="vSteps">1</span></label>
+  <div class="row"><label><span>模拟步速(步/帧) <button class="tip" data-tip="每帧模拟的物理步数。调大:时间加速、蛛网运动更细腻,计算量也随之增大。"></button></span><span id="vSteps">1</span></label>
     <input type="range" id="sSteps" min="1" max="6" step="1" value="1"></div>
-  <div class="row"><label>渲染精度 <span id="vScale">1.00x</span></label>
+  <div class="row"><label><span>渲染精度 <button class="tip" data-tip="画面分辨率倍数。调低更流畅、调高更清晰;改变会重置物理模拟。"></button></span><span id="vScale">1.00x</span></label>
     <input type="range" id="sScale" min="0.25" max="2" step="0.05" value="1"></div>
-  <div class="row"><label class="chk"><input type="checkbox" id="cFloat" checked> 浮点缓冲(Verlet 物理必需)</label></div>
+  <div class="row"><label class="chk"><input type="checkbox" id="cFloat" checked> 浮点缓冲(Verlet 物理必需) <button class="tip" data-tip="Verlet 物理依赖精确位置。勾掉(8位缓冲)会看到轨迹抖动、物理退化——正好对比学习。"></button></label></div>
   <hr>
-  <div class="row"><label>弹簧刚度 K <span id="vK">0.050</span></label>
+  <div class="row"><label><span>弹簧刚度 K <button class="tip" data-tip="蛛网的软硬。调大:网紧绷、回弹快;调小:网松软、下垂明显、荡漾缓慢。"></button></span><span id="vK">0.050</span></label>
     <input type="range" id="sK" min="0.005" max="0.2" step="0.005" value="0.05"></div>
-  <div class="row"><label>摩擦阻尼 <span id="vFriction">0.030</span></label>
+  <div class="row"><label><span>摩擦阻尼 <button class="tip" data-tip="摆动能量的衰减速度。0=蛛网被碰后永远荡漾不停;调大很快恢复静止。"></button></span><span id="vFriction">0.030</span></label>
     <input type="range" id="sFriction" min="0" max="0.3" step="0.005" value="0.03"></div>
-  <div class="row"><label>重力强度 <span id="vGravity">3.0</span></label>
+  <div class="row"><label><span>重力强度 <button class="tip" data-tip="蛛网被往下压的程度。0=蜘蛛失重漂浮;10=整张网被压得大幅下垂。"></button></span><span id="vGravity">3.0</span></label>
     <input type="range" id="sGravity" min="0" max="10" step="0.1" value="3"></div>
-  <div class="row"><label>蛛网间距 R1 <span id="vR1">0.020</span></label>
+  <div class="row"><label><span>蛛网间距 R1 <button class="tip" data-tip="网眼大小。拖动滑杆时整张网会实时缩放。"></button></span><span id="vR1">0.020</span></label>
     <input type="range" id="sR1" min="0.01" max="0.06" step="0.001" value="0.02"></div>
-  <div class="row"><label>拉网力度 <span id="vMouseK">0.40</span></label>
+  <div class="row"><label><span>拉网力度 <button class="tip" data-tip="按住鼠标拖动时,拉扯蛛网与蜘蛛的强度。0=鼠标失效。"></button></span><span id="vMouseK">0.40</span></label>
     <input type="range" id="sMouseK" min="0" max="1.5" step="0.05" value="0.4"></div>
   <hr>
   <div class="btns">
     <button id="btnPause">暂停</button>
     <button id="btnReset">重置</button>
   </div>
-  <div style="margin-top:6px;color:#999">空格=暂停  R=重置  P=面板  按住鼠标拖动=拉扯蛛网</div>
+  <div style="margin-top:6px;color:#999">悬停 ? 查看参数说明&#10;空格=暂停  R=重置  P=面板  按住鼠标拖动=拉扯蛛网</div>
 </div>
 <div id="hud"></div>
 <div id="err"></div>
@@ -597,6 +610,30 @@ bindSlider("sFriction","vFriction", x => x.toFixed(3),      x => { params.Fricti
 bindSlider("sGravity", "vGravity", x => x.toFixed(1),      x => { params.Gravity = x; });
 bindSlider("sR1",      "vR1",      x => x.toFixed(3),      x => { params.R1 = x; });
 bindSlider("sMouseK",  "vMouseK",  x => x.toFixed(2),      x => { params.MouseK = x; });
+
+/* ---------- 参数提示浮层 ---------- */
+const tipBox = document.createElement("div");
+tipBox.id = "tooltip";
+document.body.appendChild(tipBox);
+document.querySelectorAll("#panel .tip").forEach(b => {
+  const show = () => {
+    tipBox.textContent = b.dataset.tip;
+    tipBox.style.display = "block";
+    tipBox.style.left = "-9999px"; tipBox.style.top = "0px";   // 先离屏再测量
+    const r = b.getBoundingClientRect();
+    let x = r.right + 8, y = Math.max(6, r.top - 6);
+    if (x + tipBox.offsetWidth > innerWidth - 8) x = r.left - tipBox.offsetWidth - 8;
+    tipBox.style.left = x + "px";
+    tipBox.style.top  = Math.min(y, innerHeight - tipBox.offsetHeight - 6) + "px";
+  };
+  const hide = () => { tipBox.style.display = "none"; };
+  b.addEventListener("mouseenter", show);   // 悬停即显示
+  b.addEventListener("mouseleave", hide);
+  b.addEventListener("click", e => {        // 点击锁定/解锁(触屏友好)
+    e.stopPropagation();
+    if (tipBox.style.display === "block") hide(); else show();
+  });
+});
 $("cFloat").addEventListener("change", e => { params.floatBuf = e.target.checked; reset(); });
 
 /* ---------- 渲染 pass ---------- */
