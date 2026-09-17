@@ -54,6 +54,17 @@
     <input type="range" id="sScale" min="0.25" max="2" step="0.05" value="1"></div>
   <div class="row"><label class="chk"><input type="checkbox" id="cFloat" checked> 浮点缓冲(Verlet 物理必需)</label></div>
   <hr>
+  <div class="row"><label>弹簧刚度 K <span id="vK">0.050</span></label>
+    <input type="range" id="sK" min="0.005" max="0.2" step="0.005" value="0.05"></div>
+  <div class="row"><label>摩擦阻尼 <span id="vFriction">0.030</span></label>
+    <input type="range" id="sFriction" min="0" max="0.3" step="0.005" value="0.03"></div>
+  <div class="row"><label>重力强度 <span id="vGravity">3.0</span></label>
+    <input type="range" id="sGravity" min="0" max="10" step="0.1" value="3"></div>
+  <div class="row"><label>蛛网间距 R1 <span id="vR1">0.020</span></label>
+    <input type="range" id="sR1" min="0.01" max="0.06" step="0.001" value="0.02"></div>
+  <div class="row"><label>拉网力度 <span id="vMouseK">0.40</span></label>
+    <input type="range" id="sMouseK" min="0" max="1.5" step="0.05" value="0.4"></div>
+  <hr>
   <div class="btns">
     <button id="btnPause">暂停</button>
     <button id="btnReset">重置</button>
@@ -75,14 +86,16 @@ void main(){
 #define F01 ivec2(0,1)
 #define R iResolution.xy
 #define PI 3.141592654
-#define K 0.05
-#define Friction 0.03
-#define Gravity vec2(0.,-3.)
+// v2:物理参数改为 uniform,由面板滑杆实时控制(默认值 = 原作常量)
+uniform float K;         // 弹簧刚度(原 0.05)
+uniform float Friction;  // 摩擦阻尼(原 0.03)
+uniform vec2  Gravity;   // 重力(JS 传 (0,-强度),原 (0,-3))
+uniform float uMouseK;   // 拉网力度(原 0.4)
+#define MouseForce (iMouse.xy/R-vec2(0.7,0.5))*uMouseK
 #define spiderf ivec2[] (ivec2(0,2),ivec2(9,1),ivec2(7,1),ivec2(1,2),ivec2(5,2),ivec2(4,1),ivec2(2,1),ivec2(6,2));
-#define spidert ivec2[] (ivec2(0,1),ivec2(8,1),ivec2(6,2),ivec2(1,1),ivec2(5,3),ivec2(5,2),ivec2(2,0),ivec2(6,3));
-#define MouseForce (iMouse.xy/R-vec2(0.7,0.5))*0.4</script>
+#define spidert ivec2[] (ivec2(0,1),ivec2(8,1),ivec2(6,2),ivec2(1,1),ivec2(5,3),ivec2(5,2),ivec2(2,0),ivec2(6,3));</script>
 <script id="fs-bufferA" type="text/x-fragment">
-const float R1 = 0.02;
+uniform float R1;   // 蛛网节点间距(v2 滑杆,原 0.02)
 
 vec2 HukeLaw(in vec2 localP,in vec2 otherP,float k,float r){
 	vec2 AB = otherP - localP;
@@ -478,7 +491,8 @@ out vec4          fragColor;
 // Common pass:两段着色器共享的宏与常量
 const COMMON = $("fs-common").textContent;
 
-const params = { steps: 1, scale: 1, floatBuf: true };
+const params = { steps: 1, scale: 1, floatBuf: true,
+                 K: 0.05, Friction: 0.03, Gravity: 3, R1: 0.02, MouseK: 0.4 };
 let paused = false;
 
 /* ---------- 程序:Buffer A(Common + 主体)与 Image(Common + 主体) ---------- */
@@ -496,8 +510,8 @@ function uniforms(p, names){
   for (const n of names) u[n] = gl.getUniformLocation(p, n);
   return u;
 }
-const bufU = uniforms(bufProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0"]);
-const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0"]);
+const bufU = uniforms(bufProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","K","Friction","Gravity","R1","uMouseK"]);
+const imgU = uniforms(imgProg, ["iResolution","iTime","iTimeDelta","iFrameRate","iFrame","iMouse","iDate","iSampleRate","iChannelResolution","iChannelTime","iChannel0","uMouseK"]);
 
 let texPair = null, fbo = null, bufW = 0, bufH = 0;
 function createBuffers(w, h){
@@ -578,6 +592,11 @@ function bindSlider(id, out, fmt, set){
 }
 bindSlider("sSteps", "vSteps", x => String(x), x => { params.steps = x; });
 bindSlider("sScale", "vScale", x => x.toFixed(2) + "x", x => { params.scale = x; });
+bindSlider("sK",       "vK",       x => x.toFixed(3),      x => { params.K = x; });
+bindSlider("sFriction","vFriction", x => x.toFixed(3),      x => { params.Friction = x; });
+bindSlider("sGravity", "vGravity", x => x.toFixed(1),      x => { params.Gravity = x; });
+bindSlider("sR1",      "vR1",      x => x.toFixed(3),      x => { params.R1 = x; });
+bindSlider("sMouseK",  "vMouseK",  x => x.toFixed(2),      x => { params.MouseK = x; });
 $("cFloat").addEventListener("change", e => { params.floatBuf = e.target.checked; reset(); });
 
 /* ---------- 渲染 pass ---------- */
@@ -602,6 +621,12 @@ function runPass(prog, u, targetTex, w, h){
   gl.uniform1f(u.iSampleRate, 48000);
   gl.uniform3fv(u.iChannelResolution, new Float32Array([bufW, bufH, 1, 0,0,0, 0,0,0, 0,0,0]));
   gl.uniform1fv(u.iChannelTime, new Float32Array(4));
+  // 物理参数 uniforms(Buffer A 用;Image 只用 uMouseK,其余 location 为 null 自动跳过)
+  if (u.K) gl.uniform1f(u.K, params.K);
+  if (u.Friction) gl.uniform1f(u.Friction, params.Friction);
+  if (u.Gravity) gl.uniform2f(u.Gravity, 0.0, -params.Gravity);
+  if (u.R1) gl.uniform1f(u.R1, params.R1);
+  if (u.uMouseK) gl.uniform1f(u.uMouseK, params.MouseK);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }

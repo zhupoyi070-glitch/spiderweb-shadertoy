@@ -1,5 +1,5 @@
 
-const float R1 = 0.02;
+uniform float R1;   // 蛛网节点间距(v2 滑杆,原 0.02)
 
 vec2 HukeLaw(in vec2 localP,in vec2 otherP,float k,float r){
 	vec2 AB = otherP - localP;
