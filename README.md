@@ -8,7 +8,11 @@
 Verlet 积分,胡克定律弹簧约束,带重力、摩擦、回弹;蜘蛛的 8 只脚被弹簧拉向身体质心。
 **按住鼠标拖动可以拉扯蛛网和蜘蛛**。全部由 GPU 着色器实时计算,无外部资源。
 
-## 怎么运行
+## 在线游玩
+
+**https://zhupoyi070-glitch.github.io/spiderweb-shadertoy/**(GitHub Pages,打开即玩)
+
+## 怎么运行(本地)
 
 **方式一(最简单):双击 `index.html`** —— 着色器已内嵌,单文件运行,无需服务器。
 
@@ -72,7 +76,7 @@ Verlet 积分,胡克定律弹簧约束,带重力、摩擦、回弹;蜘蛛的 8 �
 
 ## 文件清单
 
-- `index.html` —— 单文件运行版(双击即玩)
+- `index.html` —— 单文件运行版(双击即玩,或访问上方在线链接)
 - `index.template.html` —— 运行时模板(不含着色器源码)
 - `shaders/image.frag` / `shaders/bufferA.frag` / `shaders/common.frag` —— 原作源码
 - `_shader.json` —— Shadertoy 官方接口原始数据留档

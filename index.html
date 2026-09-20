@@ -798,7 +798,7 @@ function tbArm(i){
   tb.style.display = "block";
 }
 function tbShowHint(n){
-  hintShown = n;
+  tbGoal.style.display = "block";               // fix:显示外层容器
   $("tbH1").style.display = n === 1 ? "block" : "none";
   $("tbH2").style.display = n === 2 ? "block" : "none";
 }
